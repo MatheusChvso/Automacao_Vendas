@@ -1,0 +1,25 @@
+# Arquivo gitignore para o projeto de automação de vendas
+
+# 1. PASTAS DE DADOS
+# Ignora completamente as pastas onde os arquivos XLSX são manipulados.
+# A barra no final (/) garante que estamos ignorando uma pasta.
+Para_Processar/
+Processados/
+Erro/
+
+# 2. AMBIENTE VIRTUAL DO PYTHON
+# Nunca adicione seu ambiente virtual (venv) ao Git.
+venv/
+.venv/
+env/
+.env
+
+# 3. CACHE E ARQUIVOS COMPILADOS DO PYTHON
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 4. ARQUIVOS ESPECÍFICOS DE IDES (Opcional, mas recomendado)
+.vscode/
+.idea/
