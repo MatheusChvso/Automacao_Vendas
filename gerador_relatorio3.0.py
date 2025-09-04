@@ -17,6 +17,10 @@ MONGO_COLLECTION = "pedidos"
 
 # 2. Padrão de Cores para os Gráficos
 CORES_GRAFICOS = ["#003f5c", "#58508d", "#bc5090", "#ff6361", "#ffa600"]
+# <<< ADICIONADO: Cores específicas para o novo gráfico >>>
+COR_PRINCIPAL = "#003f5c"
+COR_SECUNDARIA = "#58508d"
+# <<< FIM DA ADIÇÃO >>>
 
 # 3. Nomes das Filiais (para garantir a ordem correta nos gráficos)
 FILIAIS_ORDEM = ["Solution", "Vale Aço", "Zona da Mata", "Rio de Janeiro"]
@@ -44,7 +48,6 @@ def buscar_dados_mongodb():
         print(f"Erro ao buscar dados do MongoDB: {e}")
         return pd.DataFrame()
 
-# <<< FUNÇÃO DE GRÁFICO ATUALIZADA >>>
 def criar_grafico_vendas_filial(df_dados, titulo, nome_arquivo):
     """Cria um gráfico de barras vertical com vendas por filial e salva como imagem."""
     if df_dados.empty:
@@ -54,30 +57,26 @@ def criar_grafico_vendas_filial(df_dados, titulo, nome_arquivo):
     vendas_por_filial = df_dados.groupby('filial_nome')['valor_total_pedido'].sum().reindex(FILIAIS_ORDEM).fillna(0)
     
     plt.style.use('seaborn-v0_8-whitegrid')
-    fig, ax = plt.subplots(figsize=(8, 4.5)) # Aumentei um pouco a altura para o rótulo caber melhor
+    fig, ax = plt.subplots(figsize=(8, 4.5))
 
     barplot = sns.barplot(x=vendas_por_filial.index, y=vendas_por_filial.values, palette=CORES_GRAFICOS, ax=ax)
     
-    # Título já é centralizado por padrão
-    ax.set_title(titulo, fontsize=14, weight='bold', pad=20) # 'pad' adiciona espaço para o título
+    ax.set_title(titulo, fontsize=14, weight='bold', pad=20)
     ax.set_xlabel('Filial', fontsize=10)
     ax.set_ylabel('Valor Total de Vendas (R$)', fontsize=10)
     
     formatter = mticker.FuncFormatter(lambda x, p: f'R$ {x:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.'))
     ax.yaxis.set_major_formatter(formatter)
 
-    # <<< ALTERAÇÃO AQUI: Adiciona os rótulos de valor em cima das barras >>>
     for container in ax.containers:
         ax.bar_label(
             container,
             fmt=lambda x: f'R$ {x:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.'),
             fontsize=9,
             color='black',
-            padding=3 # Espaço entre a barra e o texto
+            padding=3
         )
-    # <<< FIM DA ALTERAÇÃO >>>
 
-    # Ajusta o limite superior do eixo Y para dar espaço para os rótulos
     ax.set_ylim(top=ax.get_ylim()[1] * 1.15)
     
     plt.xticks(rotation=0, ha='center')
@@ -87,6 +86,60 @@ def criar_grafico_vendas_filial(df_dados, titulo, nome_arquivo):
     plt.savefig(nome_arquivo, dpi=300)
     plt.close()
     return True
+
+# <<< NOVA FUNÇÃO ADICIONADA >>>
+def criar_grafico_evolucao_mensal(df, nome_arquivo):
+    """Cria um gráfico de linha com a evolução das vendas nos últimos 12 meses."""
+    if df.empty:
+        print("Aviso: Sem dados para gerar o gráfico de evolução mensal.")
+        return False
+
+    # Define o período dos últimos 12 meses completos
+    hoje = datetime.now()
+    fim_periodo = hoje.replace(day=1) - relativedelta(microseconds=1)
+    inicio_periodo = fim_periodo.replace(day=1) - relativedelta(months=11)
+    
+    df_periodo = df[(df['emissao'] >= inicio_periodo) & (df['emissao'] <= fim_periodo)]
+
+    if df_periodo.empty:
+        print("Aviso: Sem dados nos últimos 12 meses para gerar o gráfico de evolução.")
+        return False
+        
+    # Agrupa vendas por mês
+    vendas_mensais = df_periodo.groupby(pd.Grouper(key='emissao', freq='M'))['valor_total_pedido'].sum()
+    
+    plt.style.use('seaborn-v0_8-whitegrid')
+    fig, ax = plt.subplots(figsize=(10, 5))
+    
+    # Adaptação para usar as cores hexadecimais diretamente
+    sns.lineplot(x=vendas_mensais.index, y=vendas_mensais.values, marker='o', color=COR_PRINCIPAL, ax=ax)
+
+    # Adiciona os valores em cada ponto
+    for mes, valor in vendas_mensais.items():
+        ax.text(mes, valor + (vendas_mensais.max() * 0.02), f'R${valor:,.0f}', ha='center', size=8, color=COR_SECUNDARIA)
+
+    ax.set_title('Evolução Mensal de Vendas (Últimos 12 Meses)', fontsize=14, weight='bold', pad=20)
+    ax.set_xlabel('Mês', fontsize=10)
+    ax.set_ylabel('Vendas (R$)', fontsize=10)
+    
+    formatter = mticker.FuncFormatter(lambda x, p: f'R$ {x:,.0f}')
+    ax.yaxis.set_major_formatter(formatter)
+    
+    # Garante que o eixo Y comece em zero
+    ax.set_ylim(bottom=0, top=vendas_mensais.max() * 1.15)
+    
+    ax.axhline(y=0, color='black', linewidth=0.8)
+    
+    # Formata o eixo X para mostrar Mês/Ano
+    ax.xaxis.set_major_formatter(plt.FixedFormatter(vendas_mensais.index.strftime('%b/%y')))
+    fig.autofmt_xdate(rotation=45)
+
+    plt.tight_layout()
+    print(f"Salvando gráfico: {nome_arquivo}")
+    plt.savefig(nome_arquivo, dpi=300, bbox_inches='tight')
+    plt.close()
+    return True
+# <<< FIM DA NOVA FUNÇÃO >>>
 
 class PDF(FPDF):
     def header(self):
@@ -101,16 +154,13 @@ class PDF(FPDF):
         self.set_font('Arial', 'I', 8)
         self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
         
-    # <<< FUNÇÃO DE TABELA ATUALIZADA >>>
     def criar_tabela(self, titulo_tabela, header, data):
         self.set_font('Arial', 'B', 12)
-        # <<< ALTERAÇÃO AQUI: Título da tabela centralizado >>>
         self.cell(0, 10, titulo_tabela, 0, 1, 'C')
         self.ln(2)
 
         self.set_font('Arial', 'B', 9)
         col_widths = [25, 85, 30, 30]
-        # Calcula o ponto de início X para centralizar a tabela
         table_width = sum(col_widths)
         start_x = self.w / 2 - table_width / 2
         self.set_x(start_x)
@@ -121,13 +171,11 @@ class PDF(FPDF):
         
         self.set_font('Arial', '', 8)
         for row in data:
-            self.set_x(start_x) # Reposiciona para cada linha
-            # <<< ALTERAÇÃO AQUI: Centraliza o conteúdo das células de dados >>>
-            self.cell(col_widths[0], 6, str(row[0]), 1, 0, 'C') # Emissão
-            self.cell(col_widths[1], 6, str(row[1]), 1, 0, 'L') # Parceiro (mantido à esquerda para legibilidade)
-            self.cell(col_widths[2], 6, str(row[2]), 1, 0, 'C') # Vendedor
-            self.cell(col_widths[3], 6, str(row[3]), 1, 0, 'R') # Valor Total (alinhado à direita)
-            # <<< FIM DA ALTERAÇÃO >>>
+            self.set_x(start_x)
+            self.cell(col_widths[0], 6, str(row[0]), 1, 0, 'C')
+            self.cell(col_widths[1], 6, str(row[1]), 1, 0, 'L')
+            self.cell(col_widths[2], 6, str(row[2]), 1, 0, 'C')
+            self.cell(col_widths[3], 6, str(row[3]), 1, 0, 'R')
             self.ln()
         self.ln(10)
 
@@ -135,30 +183,6 @@ class PDF(FPDF):
 def gerar_relatorio():
     df = buscar_dados_mongodb()
 
-      # <<< ADICIONE ESTE BLOCO DE CÓDIGO PARA INSPEÇÃO >>>
-    print("\n" + "="*50)
-    print("INÍCIO DA INSPEÇÃO DO DATAFRAME CARREGADO")
-    print("="*50)
-    if not df.empty:
-        print(f"Total de linhas carregadas no DataFrame: {len(df)}")
-        print("\nInformações das colunas (tipos de dados e valores não nulos):")
-        df.info()
-        print("\nEstatísticas descritivas dos campos numéricos:")
-        print(df.describe())
-        print("\nPrimeiras 5 linhas dos dados:")
-        print(df.head())
-        print("\nÚltimas 5 linhas dos dados:")
-        print(df.tail())
-    else:
-        print("O DataFrame está vazio.")
-    print("="*50)
-    print("FIM DA INSPEÇÃO DO DATAFRAME")
-    print("="*50 + "\n")
-    # <<< FIM DO BLOCO DE INSPEÇÃO >>>
-
-    if df.empty:
-        print("Não foi possível gerar o relatório pois não há dados.")
-        return
     if df.empty:
         print("Não foi possível gerar o relatório pois não há dados.")
         return
@@ -181,6 +205,10 @@ def gerar_relatorio():
     kpi_mes_passado = f"R$ {vendas_mes_passado:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
     kpi_ano_atual = f"R$ {vendas_ano_atual:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
 
+    # <<< ALTERAÇÃO: Geração do novo gráfico >>>
+    grafico_evolucao_ok = criar_grafico_evolucao_mensal(df, 'grafico_evolucao_mensal.png')
+    # <<< FIM DA ALTERAÇÃO >>>
+    
     grafico1_ok = criar_grafico_vendas_filial(df_mes_atual, f"Vendas por Filial - {hoje.strftime('%B/%Y')}", 'grafico_mes_atual.png')
     grafico2_ok = criar_grafico_vendas_filial(df_ano_atual, f"Vendas por Filial - Acumulado {hoje.year}", 'grafico_ano.png')
     grafico3_ok = criar_grafico_vendas_filial(df_mes_passado, f"Vendas por Filial - {mes_passado_inicio.strftime('%B/%Y')}", 'grafico_mes_passado.png')
@@ -189,19 +217,21 @@ def gerar_relatorio():
     pdf.add_page()
     
     pdf.set_font('Arial', 'B', 12)
-    # <<< ALTERAÇÃO AQUI: Título da seção de KPIs centralizado >>>
     pdf.cell(0, 10, 'Indicadores Chave de Performance (KPIs)', 0, 1, 'C')
     pdf.set_font('Arial', '', 11)
-    # O texto dos KPIs em si fica melhor alinhado à esquerda para legibilidade da lista
     pdf.multi_cell(0, 8, 
         f"- Vendas no mês atual ({hoje.strftime('%B/%Y')}, {hoje.day} dias): {kpi_mes_atual}\n"
         f"- Vendas no mês passado ({mes_passado_inicio.strftime('%B/%Y')}): {kpi_mes_passado}\n"
         f"- Vendas acumuladas no ano ({hoje.year}): {kpi_ano_atual}"
     )
-    pdf.ln(10)
+    pdf.ln(5) # Diminuí o espaço para caber melhor
     
-    # Inserção dos gráficos centralizados
-    # A lógica x=10, w=190 já centraliza a imagem na área útil da página A4 (210mm de largura com 10mm de margem de cada lado)
+    # <<< ALTERAÇÃO: Inserção do novo gráfico no PDF >>>
+    if grafico_evolucao_ok:
+        pdf.image('grafico_evolucao_mensal.png', x=10, w=190)
+        pdf.ln(5)
+    # <<< FIM DA ALTERAÇÃO >>>
+
     if grafico1_ok:
         pdf.image('grafico_mes_atual.png', x=10, w=190)
     if grafico2_ok:
@@ -211,7 +241,6 @@ def gerar_relatorio():
 
     pdf.add_page()
     pdf.set_font('Arial', 'B', 14)
-    # <<< ALTERAÇÃO AQUI: Título da página 2 centralizado >>>
     pdf.cell(0, 10, 'Detalhamento - Últimas 10 Vendas por Filial', 0, 1, 'C')
     pdf.ln(5)
 
@@ -233,20 +262,28 @@ def gerar_relatorio():
                 f"R$ {row['valor_total_pedido']:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
             ])
         
-        # A função criar_tabela agora cuida da centralização da tabela e do título
         pdf.criar_tabela(f"Filial: {filial}", header_tabela, dados_tabela)
 
     nome_pdf_final = f"Relatorio_Vendas_{hoje.strftime('%Y-%m')}.pdf"
     print(f"Salvando PDF final: {nome_pdf_final}")
     pdf.output(nome_pdf_final)
 
-    for f in ['grafico_mes_atual.png', 'grafico_ano.png', 'grafico_mes_passado.png']:
+    # <<< ALTERAÇÃO: Adicionado o novo arquivo de gráfico para ser removido >>>
+    arquivos_para_remover = [
+        'grafico_mes_atual.png', 
+        'grafico_ano.png', 
+        'grafico_mes_passado.png',
+        'grafico_evolucao_mensal.png'
+    ]
+    for f in arquivos_para_remover:
         if os.path.exists(f):
             os.remove(f)
+    # <<< FIM DA ALTERAÇÃO >>>
 
 if __name__ == '__main__':
     import locale
     try:
+        # Define o locale para Português do Brasil para formatar os nomes dos meses
         locale.setlocale(locale.LC_TIME, 'pt_BR.UTF-8')
     except locale.Error:
         print("Aviso: Locale 'pt_BR.UTF-8' não encontrado. Nomes dos meses podem ficar em inglês.")

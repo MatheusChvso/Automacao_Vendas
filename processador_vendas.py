@@ -117,16 +117,23 @@ def processar_arquivos():
                 df_temp = pd.read_csv(caminho_arquivo, sep=';', decimal=',')
             else:
                 df_temp = pd.read_excel(caminho_arquivo)
-
-            # --- LÓGICA DE ENRIQUECIMENTO DA FILIAL ---
-            codigo_filial = arquivo.split('.')[0].replace('filial_', '')
-            nome_completo_filial = MAPA_FILIAIS.get(codigo_filial, codigo_filial) # .get() é seguro
+    
+           
+            codigo_filial_encontrado = None
+            for codigo in MAPA_FILIAIS.keys():
+                if codigo in arquivo:
+                    codigo_filial_encontrado = codigo
+                    break # Para assim que encontrar o primeiro código
             
-            df_temp['filial_codigo'] = codigo_filial
-            df_temp['filial_nome'] = nome_completo_filial
-            # -----------------------------------------
-            
-            lista_dfs.append(df_temp)
+            if codigo_filial_encontrado:
+                nome_completo_filial = MAPA_FILIAIS[codigo_filial_encontrado]
+                df_temp['filial_codigo'] = codigo_filial_encontrado
+                df_temp['filial_nome'] = nome_completo_filial
+                print(f"  -> Filial '{nome_completo_filial}' identificada.")
+                lista_dfs.append(df_temp)
+            else:
+                print(f"  -> AVISO: Nenhuma filial conhecida (SS, Va, SZM, RJ) encontrada no nome do arquivo '{arquivo}'. Arquivo ignorado.")
+           
         except Exception as e:
             print(f"Erro ao ler o arquivo {arquivo}: {e}")
             shutil.move(caminho_arquivo, os.path.join(PASTA_ERRO, arquivo))
