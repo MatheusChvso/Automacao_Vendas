@@ -10,17 +10,14 @@ import os
 import locale
 
 # --- CONFIGURAÇÕES GERAIS E DE ESTILO ---
-# <<< ALTERAÇÃO: Configurações atualizadas para a fusão >>>
 MONGO_CONNECTION_STRING = "mongodb://localhost:27017/"
 MONGO_DATABASE = "vendas_db"
 MONGO_COLLECTION = "pedidos"
 COR_PRINCIPAL = "#003f5c"
 COR_SECUNDARIA = "#2f4f4f"
 COR_FUNDO_KPI = "#f0f0f0"
-CORES_GRAFICOS = ["#003f5c", "#ff6361", "#ffa600"] # Apenas 3 cores para as 3 filiais
-FILIAIS_ORDEM = ["Juiz de Fora", "Vale Aço", "Rio de Janeiro"] # Nova ordem com la filial 'JF'
-# <<< FIM DA ALTERAÇÃO >>>
-
+CORES_GRAFICOS = ["#003f5c", "#ff6361", "#ffa600"]
+FILIAIS_ORDEM = ["Juiz de Fora", "Vale Aço", "Rio de Janeiro"]
 A4_LARGURA = 210
 A4_ALTURA = 297
 MARGEM = 10
@@ -131,9 +128,13 @@ def criar_grafico_vendas_filial(df_dados, titulo, nome_arquivo, tamanho='largo')
 
 def criar_grafico_evolucao_mensal(df, nome_arquivo):
     if df.empty: return False
+    # <<< LÓGICA DE DATAS CORRIGIDA >>>
     hoje = datetime.now()
-    fim_periodo = hoje.replace(day=1) - relativedelta(microseconds=1)
-    inicio_periodo = fim_periodo.replace(day=1) - relativedelta(months=11)
+    primeiro_dia_mes_atual = hoje.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    fim_periodo = primeiro_dia_mes_atual - relativedelta(microseconds=1)
+    inicio_periodo = primeiro_dia_mes_atual - relativedelta(months=12)
+    # <<< FIM DA CORREÇÃO >>>
+    
     df_periodo = df[(df['emissao'] >= inicio_periodo) & (df['emissao'] <= fim_periodo)]
     if df_periodo.empty: return False
     vendas_mensais = df_periodo.groupby(pd.Grouper(key='emissao', freq='M'))['valor_total_pedido'].sum()
@@ -142,7 +143,7 @@ def criar_grafico_evolucao_mensal(df, nome_arquivo):
     sns.lineplot(x=vendas_mensais.index, y=vendas_mensais.values, marker='o', color=COR_PRINCIPAL, ax=ax)
     for mes, valor in vendas_mensais.items():
         ax.text(mes, valor + (vendas_mensais.max() * 0.02), f'R${valor:,.0f}', ha='center', size=8, color=COR_SECUNDARIA)
-    ax.set_title('Evolução Mensal de Vendas (Geral - Últimos 12 Meses)', fontsize=14, weight='bold', pad=20)
+    ax.set_title('Evolução Mensal (Geral - Últimos 12 Meses Completos)', fontsize=14, weight='bold', pad=20)
     ax.set_xlabel('Mês', fontsize=10)
     ax.set_ylabel('Vendas (R$)', fontsize=10)
     formatter = mticker.FuncFormatter(lambda x, p: f'R$ {x:,.0f}')
@@ -157,29 +158,22 @@ def criar_grafico_evolucao_mensal(df, nome_arquivo):
     return True
 
 def criar_grafico_evolucao_por_filial(df, nome_arquivo):
-    """Cria um gráfico de linha com a evolução das vendas por filial nos últimos 12 meses."""
-    if df.empty:
-        print("Aviso: Sem dados para gerar o gráfico de evolução por filial.")
-        return False
-
+    if df.empty: return False
+    # <<< LÓGICA DE DATAS CORRIGIDA >>>
     hoje = datetime.now()
-    fim_periodo = hoje.replace(day=1) - relativedelta(microseconds=1)
-    inicio_periodo = fim_periodo.replace(day=1) - relativedelta(months=11)
-    df_periodo = df[(df['emissao'] >= inicio_periodo) & (df['emissao'] <= fim_periodo)]
+    primeiro_dia_mes_atual = hoje.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    fim_periodo = primeiro_dia_mes_atual - relativedelta(microseconds=1)
+    inicio_periodo = primeiro_dia_mes_atual - relativedelta(months=12)
+    # <<< FIM DA CORREÇÃO >>>
 
-    if df_periodo.empty:
-        print("Aviso: Sem dados nos últimos 12 meses para o gráfico por filial.")
-        return False
-        
+    df_periodo = df[(df['emissao'] >= inicio_periodo) & (df['emissao'] <= fim_periodo)]
+    if df_periodo.empty: return False
     vendas_por_mes_filial = df_periodo.groupby([pd.Grouper(key='emissao', freq='M'), 'filial_nome'])['valor_total_pedido'].sum()
     df_pivot = vendas_por_mes_filial.unstack(fill_value=0)
-
     plt.style.use('seaborn-v0_8-whitegrid')
     fig, ax = plt.subplots(figsize=(10, 5))
-    
     sns.lineplot(data=df_pivot, marker='o', ax=ax, palette=CORES_GRAFICOS)
-
-    ax.set_title('Evolução Mensal por Filial (Últimos 12 Meses)', fontsize=14, weight='bold', pad=20)
+    ax.set_title('Evolução Mensal por Filial (Últimos 12 Meses Completos)', fontsize=14, weight='bold', pad=20)
     ax.set_xlabel('Mês', fontsize=10)
     ax.set_ylabel('Vendas (R$)', fontsize=10)
     formatter = mticker.FuncFormatter(lambda x, p: f'R$ {x:,.0f}')
@@ -237,14 +231,14 @@ def gerar_relatorio():
     pdf.caixa_kpi(MARGEM + (LARGURA_UTIL / 3), kpi_y_pos, f"Vendas Mês Passado", kpi_mes_passado)
     pdf.caixa_kpi(MARGEM + 2 * (LARGURA_UTIL / 3), kpi_y_pos, "Vendas no Ano", kpi_ano_atual)
     y_pos_atual = kpi_y_pos + 35 
-    altura_grafico = 62
+    altura_grafico_barra = 62
     espaco_vertical = 8
     if grafico_ano_ok:
         pdf.image('grafico_ano.png', x=MARGEM, y=y_pos_atual, w=LARGURA_UTIL)
-        y_pos_atual += altura_grafico + espaco_vertical
+        y_pos_atual += altura_grafico_barra + espaco_vertical
     if grafico_mes_atual_ok:
         pdf.image('grafico_mes_atual.png', x=MARGEM, y=y_pos_atual, w=LARGURA_UTIL)
-        y_pos_atual += altura_grafico + espaco_vertical
+        y_pos_atual += altura_grafico_barra + espaco_vertical
     if grafico_mes_passado_ok:
         pdf.image('grafico_mes_passado.png', x=MARGEM, y=y_pos_atual, w=LARGURA_UTIL)
 
@@ -268,19 +262,22 @@ def gerar_relatorio():
             dados = [[row['emissao'].strftime('%d/%m/%y'), row['parceiro'], row['vendedor'], f"R${row['valor_total_pedido']:,.0f}"] for _, row in df_filial.iterrows()]
             y_coluna_direita_atual = pdf.criar_tabela(A4_LARGURA / 2 + 2, y_coluna_direita_atual, f"Últimas Vendas: {filial}", header_tabela, dados, col_widths)
 
-    if grafico_evolucao_geral_ok:
+    if grafico_evolucao_geral_ok or grafico_evolucao_filial_ok:
         pdf.add_page()
         pdf.set_font('Arial', 'B', 14)
-        pdf.cell(0, 10, 'Performance de Vendas ao Longo do Tempo (Geral)', 0, 1, 'C')
+        pdf.cell(0, 10, 'Análise de Evolução de Vendas', 0, 1, 'C')
         pdf.ln(5)
-        pdf.image('grafico_evolucao_geral.png', x=MARGEM, y=pdf.get_y(), w=LARGURA_UTIL)
-
-    if grafico_evolucao_filial_ok:
-        pdf.add_page()
-        pdf.set_font('Arial', 'B', 14)
-        pdf.cell(0, 10, 'Performance de Vendas ao Longo do Tempo (por Filial)', 0, 1, 'C')
-        pdf.ln(5)
-        pdf.image('grafico_evolucao_filial.png', x=MARGEM, y=pdf.get_y(), w=LARGURA_UTIL)
+        
+        y_pos_atual = pdf.get_y()
+        altura_grafico_linha = 75
+        espaco_vertical = 10
+        
+        if grafico_evolucao_geral_ok:
+            pdf.image('grafico_evolucao_geral.png', x=MARGEM, y=y_pos_atual, w=LARGURA_UTIL)
+            y_pos_atual += altura_grafico_linha + espaco_vertical
+        
+        if grafico_evolucao_filial_ok:
+            pdf.image('grafico_evolucao_filial.png', x=MARGEM, y=y_pos_atual, w=LARGURA_UTIL)
 
     nome_pdf_final = f"Dashboard_Vendas_{hoje.strftime('%Y-%m')}.pdf"
     print(f"Salvando PDF final: {nome_pdf_final}")
