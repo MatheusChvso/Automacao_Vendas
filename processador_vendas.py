@@ -14,11 +14,12 @@ PASTA_ERRO = 'Erro'
 # 2. Mapeamento de Filiais (NOVA SEÇÃO)
 #    Mapeia o código do arquivo para o nome completo da filial.
 MAPA_FILIAIS = {
-    "SS": "Solution",
-    "Va": "Vale Aço",
-    "SZM": "Zona da Mata",
-    "RJ": "Rio de Janeiro"
+    "SS":  {"codigo_novo": "JF", "nome_novo": "Juiz de Fora"},
+    "SZM": {"codigo_novo": "JF", "nome_novo": "Juiz de Fora"},
+    "Va":  {"codigo_novo": "Va", "nome_novo": "Vale Aço"},
+    "RJ":  {"codigo_novo": "RJ", "nome_novo": "Rio de Janeiro"}
 }
+
 
 # 3. Configurações do MongoDB
 MONGO_CONNECTION_STRING = "mongodb://localhost:27017/"
@@ -117,22 +118,24 @@ def processar_arquivos():
                 df_temp = pd.read_csv(caminho_arquivo, sep=';', decimal=',')
             else:
                 df_temp = pd.read_excel(caminho_arquivo)
-    
-           
+
+            # <<< LÓGICA DE EXTRAÇÃO DE FILIAL ATUALIZADA PARA A FUSÃO >>>
             codigo_filial_encontrado = None
-            for codigo in MAPA_FILIAIS.keys():
-                if codigo in arquivo:
-                    codigo_filial_encontrado = codigo
-                    break # Para assim que encontrar o primeiro código
+            for codigo_original in MAPA_FILIAIS.keys():
+                if codigo_original in arquivo:
+                    codigo_filial_encontrado = codigo_original
+                    break
             
             if codigo_filial_encontrado:
-                nome_completo_filial = MAPA_FILIAIS[codigo_filial_encontrado]
-                df_temp['filial_codigo'] = codigo_filial_encontrado
-                df_temp['filial_nome'] = nome_completo_filial
-                print(f"  -> Filial '{nome_completo_filial}' identificada.")
+                dados_fusao = MAPA_FILIAIS[codigo_filial_encontrado]
+                df_temp['filial_codigo'] = dados_fusao['codigo_novo']
+                df_temp['filial_nome'] = dados_fusao['nome_novo']
+                print(f"  -> Filial original '{codigo_filial_encontrado}' mapeada para '{dados_fusao['nome_novo']}'.")
                 lista_dfs.append(df_temp)
             else:
-                print(f"  -> AVISO: Nenhuma filial conhecida (SS, Va, SZM, RJ) encontrada no nome do arquivo '{arquivo}'. Arquivo ignorado.")
+                print(f"  -> AVISO: Nenhuma filial conhecida encontrada no nome do arquivo '{arquivo}'. Arquivo ignorado.")
+            # <<< FIM DA ATUALIZAÇÃO >>>
+            
            
         except Exception as e:
             print(f"Erro ao ler o arquivo {arquivo}: {e}")

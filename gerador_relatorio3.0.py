@@ -10,22 +10,23 @@ import os
 import locale
 
 # --- CONFIGURAÇÕES GERAIS E DE ESTILO ---
-# Todas as cores agora estão no formato de texto hexadecimal
+# <<< ALTERAÇÃO: Configurações atualizadas para a fusão >>>
 MONGO_CONNECTION_STRING = "mongodb://localhost:27017/"
 MONGO_DATABASE = "vendas_db"
 MONGO_COLLECTION = "pedidos"
-COR_PRINCIPAL = "#003f5c"      # Azul Escuro para títulos
-COR_SECUNDARIA = "#2f4f4f"    # Cinza Escuro para texto
-COR_FUNDO_KPI = "#f0f0f0"      # Cinza Claro para o fundo das caixas de KPI
-CORES_GRAFICOS = ["#003f5c", "#58508d", "#bc5090", "#ff6361", "#ffa600"]
-FILIAIS_ORDEM = ["Solution", "Vale Aço", "Zona da Mata", "Rio de Janeiro"]
+COR_PRINCIPAL = "#003f5c"
+COR_SECUNDARIA = "#2f4f4f"
+COR_FUNDO_KPI = "#f0f0f0"
+CORES_GRAFICOS = ["#003f5c", "#ff6361", "#ffa600"] # Apenas 3 cores para as 3 filiais
+FILIAIS_ORDEM = ["Juiz de Fora", "Vale Aço", "Rio de Janeiro"] # Nova ordem com la filial 'JF'
+# <<< FIM DA ALTERAÇÃO >>>
+
 A4_LARGURA = 210
 A4_ALTURA = 297
 MARGEM = 10
 LARGURA_UTIL = A4_LARGURA - (2 * MARGEM)
 
 def hex_to_rgb(hex_color):
-    """Converte uma cor de texto hexadecimal (ex: '#RRGGBB') para uma tupla (R, G, B)."""
     hex_color = hex_color.lstrip('#')
     return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
@@ -88,75 +89,77 @@ class PDF(FPDF):
         return self.get_y()
 
 def buscar_dados_mongodb():
-    """Busca todos os pedidos do MongoDB e retorna como um DataFrame do Pandas."""
     print("Buscando dados do MongoDB...")
-    try:
-        client = MongoClient(MONGO_CONNECTION_STRING)
-        db = client[MONGO_DATABASE]
-        collection = db[MONGO_COLLECTION]
-        dados = list(collection.find({}))
-        if not dados:
-            print("Aviso: Nenhum dado encontrado no banco de dados.")
-            return pd.DataFrame()
-        df = pd.DataFrame(dados)
-        df['emissao'] = pd.to_datetime(df['emissao'])
-        print(f"{len(df)} registros encontrados.")
-        return df
-    except Exception as e:
-        print(f"Erro ao buscar dados do MongoDB: {e}")
-        return pd.DataFrame()
+    client = MongoClient(MONGO_CONNECTION_STRING)
+    db = client[MONGO_DATABASE]
+    collection = db[MONGO_COLLECTION]
+    dados = list(collection.find({}))
+    if not dados: return pd.DataFrame()
+    df = pd.DataFrame(dados)
+    df['emissao'] = pd.to_datetime(df['emissao'])
+    print(f"{len(df)} registros encontrados.")
+    return df
 
 def criar_grafico_vendas_filial(df_dados, titulo, nome_arquivo, tamanho='largo'):
-    """Cria um gráfico de barras HORIZONTAL com vendas por filial e salva como imagem."""
-    
-    # Prepara os dados, garantindo que todas as filiais apareçam mesmo com valor zero
     vendas_por_filial = pd.Series(dtype='float64')
     if not df_dados.empty:
         vendas_por_filial = df_dados.groupby('filial_nome')['valor_total_pedido'].sum()
-    
     vendas_por_filial = vendas_por_filial.reindex(FILIAIS_ORDEM).fillna(0)
-    
     fig_size = (10, 4.5) if tamanho == 'largo' else (5, 4.5)
     plt.style.use('seaborn-v0_8-whitegrid')
     fig, ax = plt.subplots(figsize=fig_size)
-    
-    # <<< ALTERAÇÃO AQUI: Invertendo os eixos X e Y para criar um gráfico horizontal >>>
     sns.barplot(x=vendas_por_filial.values, y=vendas_por_filial.index, palette=CORES_GRAFICOS, ax=ax, orient='h')
-    
     ax.set_title(titulo, fontsize=14, weight='bold', pad=20)
-    ax.set_xlabel('Vendas (R$)', fontsize=10) # <<< Eixo X agora são os valores
-    ax.set_ylabel('') # <<< Remove o rótulo do eixo Y para um visual mais limpo
-    
-    # Lógica para tratar o eixo X (valores) se houver vendas ou não
+    ax.set_xlabel('Vendas (R$)', fontsize=10)
+    ax.set_ylabel('')
     if vendas_por_filial.sum() == 0:
         ax.set_xlim(left=0, right=1)
         ax.set_xticks([0])
         ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, p: 'R$ 0'))
     else:
         formatter = mticker.FuncFormatter(lambda x, p: f'R$ {x:,.0f}')
-        ax.xaxis.set_major_formatter(formatter) # <<< Formatter aplicado ao eixo X
+        ax.xaxis.set_major_formatter(formatter)
         for container in ax.containers:
-            # A função bar_label se adapta automaticamente para barras horizontais
             ax.bar_label(container, fmt=lambda x: f'R${x:,.0f}', fontsize=8, color='black', padding=3)
         ax.set_xlim(left=0, right=ax.get_xlim()[1] * 1.18)
-
-    # <<< ALTERAÇÃO AQUI: Linha de base agora é vertical em x=0 >>>
     ax.axvline(x=0, color='black', linewidth=1.2)
-    
-    # <<< REMOVIDO: A rotação dos ticks não é mais necessária >>>
-    # plt.xticks(rotation=15, ha='right')
-    
     plt.tight_layout()
-    
     print(f"Salvando gráfico: {nome_arquivo}")
     plt.savefig(nome_arquivo, dpi=300, bbox_inches='tight')
     plt.close()
     return True
 
 def criar_grafico_evolucao_mensal(df, nome_arquivo):
-    """Cria um gráfico de linha com a evolução das vendas nos últimos 12 meses."""
+    if df.empty: return False
+    hoje = datetime.now()
+    fim_periodo = hoje.replace(day=1) - relativedelta(microseconds=1)
+    inicio_periodo = fim_periodo.replace(day=1) - relativedelta(months=11)
+    df_periodo = df[(df['emissao'] >= inicio_periodo) & (df['emissao'] <= fim_periodo)]
+    if df_periodo.empty: return False
+    vendas_mensais = df_periodo.groupby(pd.Grouper(key='emissao', freq='M'))['valor_total_pedido'].sum()
+    plt.style.use('seaborn-v0_8-whitegrid')
+    fig, ax = plt.subplots(figsize=(10, 5))
+    sns.lineplot(x=vendas_mensais.index, y=vendas_mensais.values, marker='o', color=COR_PRINCIPAL, ax=ax)
+    for mes, valor in vendas_mensais.items():
+        ax.text(mes, valor + (vendas_mensais.max() * 0.02), f'R${valor:,.0f}', ha='center', size=8, color=COR_SECUNDARIA)
+    ax.set_title('Evolução Mensal de Vendas (Geral - Últimos 12 Meses)', fontsize=14, weight='bold', pad=20)
+    ax.set_xlabel('Mês', fontsize=10)
+    ax.set_ylabel('Vendas (R$)', fontsize=10)
+    formatter = mticker.FuncFormatter(lambda x, p: f'R$ {x:,.0f}')
+    ax.yaxis.set_major_formatter(formatter)
+    ax.set_ylim(bottom=0, top=vendas_mensais.max() * 1.15)
+    ax.axhline(y=0, color='black', linewidth=0.8)
+    ax.set_xticks(vendas_mensais.index)
+    ax.set_xticklabels(vendas_mensais.index.strftime('%b/%y'), rotation=45, ha='right')
+    plt.tight_layout()
+    plt.savefig(nome_arquivo, dpi=300, bbox_inches='tight')
+    plt.close()
+    return True
+
+def criar_grafico_evolucao_por_filial(df, nome_arquivo):
+    """Cria um gráfico de linha com a evolução das vendas por filial nos últimos 12 meses."""
     if df.empty:
-        print("Aviso: Sem dados para gerar o gráfico de evolução mensal.")
+        print("Aviso: Sem dados para gerar o gráfico de evolução por filial.")
         return False
 
     hoje = datetime.now()
@@ -165,28 +168,27 @@ def criar_grafico_evolucao_mensal(df, nome_arquivo):
     df_periodo = df[(df['emissao'] >= inicio_periodo) & (df['emissao'] <= fim_periodo)]
 
     if df_periodo.empty:
-        print("Aviso: Sem dados nos últimos 12 meses para gerar o gráfico de evolução.")
+        print("Aviso: Sem dados nos últimos 12 meses para o gráfico por filial.")
         return False
         
-    vendas_mensais = df_periodo.groupby(pd.Grouper(key='emissao', freq='M'))['valor_total_pedido'].sum()
-    
+    vendas_por_mes_filial = df_periodo.groupby([pd.Grouper(key='emissao', freq='M'), 'filial_nome'])['valor_total_pedido'].sum()
+    df_pivot = vendas_por_mes_filial.unstack(fill_value=0)
+
     plt.style.use('seaborn-v0_8-whitegrid')
     fig, ax = plt.subplots(figsize=(10, 5))
     
-    sns.lineplot(x=vendas_mensais.index, y=vendas_mensais.values, marker='o', color=COR_PRINCIPAL, ax=ax)
+    sns.lineplot(data=df_pivot, marker='o', ax=ax, palette=CORES_GRAFICOS)
 
-    for mes, valor in vendas_mensais.items():
-        ax.text(mes, valor + (vendas_mensais.max() * 0.02), f'R${valor:,.0f}', ha='center', size=8, color=COR_SECUNDARIA)
-
-    ax.set_title('Evolução Mensal de Vendas (Últimos 12 Meses)', fontsize=14, weight='bold', pad=20)
+    ax.set_title('Evolução Mensal por Filial (Últimos 12 Meses)', fontsize=14, weight='bold', pad=20)
     ax.set_xlabel('Mês', fontsize=10)
     ax.set_ylabel('Vendas (R$)', fontsize=10)
     formatter = mticker.FuncFormatter(lambda x, p: f'R$ {x:,.0f}')
     ax.yaxis.set_major_formatter(formatter)
-    ax.set_ylim( top=vendas_mensais.max() * 1.15, ymin=0)
+    ax.set_ylim(bottom=0)
     ax.axhline(y=0, color='black', linewidth=0.8)
-    ax.set_xticks(vendas_mensais.index)
-    ax.set_xticklabels(vendas_mensais.index.strftime('%b/%y'), rotation=45, ha='right')
+    ax.set_xticks(df_pivot.index)
+    ax.set_xticklabels(df_pivot.index.strftime('%b/%y'), rotation=45, ha='right')
+    ax.legend(title='Filial')
     plt.tight_layout()
     print(f"Salvando gráfico: {nome_arquivo}")
     plt.savefig(nome_arquivo, dpi=300, bbox_inches='tight')
@@ -195,9 +197,7 @@ def criar_grafico_evolucao_mensal(df, nome_arquivo):
 
 def gerar_relatorio():
     df = buscar_dados_mongodb()
-    if df.empty:
-        print("Não foi possível gerar o relatório pois não há dados.")
-        return
+    if df.empty: return
 
     hoje = datetime.now()
     mes_atual_inicio = hoje.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -226,16 +226,16 @@ def gerar_relatorio():
     grafico_ano_ok = criar_grafico_vendas_filial(df_ano_atual, titulo_grafico_ano, 'grafico_ano.png', tamanho='largo')
     grafico_mes_atual_ok = criar_grafico_vendas_filial(df_mes_atual, f"Mês Atual ({hoje.strftime('%B')})", 'grafico_mes_atual.png', tamanho='largo')
     grafico_mes_passado_ok = criar_grafico_vendas_filial(df_mes_passado, f"Mês Anterior ({mes_passado_inicio.strftime('%B')})", 'grafico_mes_passado.png', tamanho='largo')
-    grafico_evolucao_ok = criar_grafico_evolucao_mensal(df, 'grafico_evolucao.png')
+    grafico_evolucao_geral_ok = criar_grafico_evolucao_mensal(df, 'grafico_evolucao_geral.png')
+    grafico_evolucao_filial_ok = criar_grafico_evolucao_por_filial(df, 'grafico_evolucao_filial.png')
 
     pdf = PDF('P', 'mm', 'A4')
-    pdf.add_page()
     
+    pdf.add_page()
     kpi_y_pos = pdf.get_y()
     pdf.caixa_kpi(MARGEM, kpi_y_pos, f"Vendas Mês Atual ({hoje.day} dias)", kpi_mes_atual)
     pdf.caixa_kpi(MARGEM + (LARGURA_UTIL / 3), kpi_y_pos, f"Vendas Mês Passado", kpi_mes_passado)
     pdf.caixa_kpi(MARGEM + 2 * (LARGURA_UTIL / 3), kpi_y_pos, "Vendas no Ano", kpi_ano_atual)
-    
     y_pos_atual = kpi_y_pos + 35 
     altura_grafico = 62
     espaco_vertical = 8
@@ -247,7 +247,7 @@ def gerar_relatorio():
         y_pos_atual += altura_grafico + espaco_vertical
     if grafico_mes_passado_ok:
         pdf.image('grafico_mes_passado.png', x=MARGEM, y=y_pos_atual, w=LARGURA_UTIL)
-    
+
     pdf.add_page()
     pdf.set_font('Arial', 'B', 14)
     pdf.cell(0, 10, 'Detalhamento - Últimas 10 Vendas por Filial', 0, 1, 'C')
@@ -267,19 +267,29 @@ def gerar_relatorio():
         if not df_filial.empty:
             dados = [[row['emissao'].strftime('%d/%m/%y'), row['parceiro'], row['vendedor'], f"R${row['valor_total_pedido']:,.0f}"] for _, row in df_filial.iterrows()]
             y_coluna_direita_atual = pdf.criar_tabela(A4_LARGURA / 2 + 2, y_coluna_direita_atual, f"Últimas Vendas: {filial}", header_tabela, dados, col_widths)
-            
-    if grafico_evolucao_ok:
+
+    if grafico_evolucao_geral_ok:
         pdf.add_page()
         pdf.set_font('Arial', 'B', 14)
-        pdf.cell(0, 10, 'Performance de Vendas ao Longo do Tempo', 0, 1, 'C')
+        pdf.cell(0, 10, 'Performance de Vendas ao Longo do Tempo (Geral)', 0, 1, 'C')
         pdf.ln(5)
-        pdf.image('grafico_evolucao.png', x=MARGEM, y=pdf.get_y(), w=LARGURA_UTIL)
+        pdf.image('grafico_evolucao_geral.png', x=MARGEM, y=pdf.get_y(), w=LARGURA_UTIL)
+
+    if grafico_evolucao_filial_ok:
+        pdf.add_page()
+        pdf.set_font('Arial', 'B', 14)
+        pdf.cell(0, 10, 'Performance de Vendas ao Longo do Tempo (por Filial)', 0, 1, 'C')
+        pdf.ln(5)
+        pdf.image('grafico_evolucao_filial.png', x=MARGEM, y=pdf.get_y(), w=LARGURA_UTIL)
 
     nome_pdf_final = f"Dashboard_Vendas_{hoje.strftime('%Y-%m')}.pdf"
     print(f"Salvando PDF final: {nome_pdf_final}")
     pdf.output(nome_pdf_final)
 
-    arquivos_graficos = ['grafico_ano.png', 'grafico_mes_atual.png', 'grafico_mes_passado.png', 'grafico_evolucao.png']
+    arquivos_graficos = [
+        'grafico_ano.png', 'grafico_mes_atual.png', 'grafico_mes_passado.png',
+        'grafico_evolucao_geral.png', 'grafico_evolucao_filial.png'
+    ]
     for f in arquivos_graficos:
         if os.path.exists(f): os.remove(f)
 
