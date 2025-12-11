@@ -13,13 +13,19 @@ MONGO_CONNECTION_STRING = "mongodb://localhost:27017/"
 MONGO_DATABASE = "vendas_db"
 MONGO_COLLECTION = "pedidos"
 
+# Configuração de Filiais Ativas (Rio de Janeiro REMOVIDO)
+FILIAIS_ATIVAS = ["Juiz de Fora", "Vale Aço"]
+
 # Paleta de Cores
 COR_PRINCIPAL = "#003f5c"   
 COR_SECUNDARIA = "#ffa600"  
 COR_TERCIARIA = "#bc5090"   
 COR_CINZA = "#58508d"
-PALETA_FILIAIS = [COR_PRINCIPAL, COR_SECUNDARIA, COR_TERCIARIA, COR_CINZA]
-# Paleta para vendedores (cores distintas)
+
+# Paleta ajustada para 2 filiais (Azul para JF, Laranja para VA, por exemplo)
+PALETA_FILIAIS = [COR_PRINCIPAL, COR_SECUNDARIA]
+
+# Paleta para vendedores
 PALETA_VENDEDORES = ["#003f5c", "#ffa600", "#ff6361", "#bc5090", "#58508d", "#488f31", "#de425b"]
 
 # Configurações PDF (A4)
@@ -40,11 +46,11 @@ class PDF(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 20)
         self.set_text_color(*hex_to_rgb(COR_PRINCIPAL))
-        self.cell(0, 10, f'Relatório de Fechamento Anual - {self.ano_relatorio}', 0, 1, 'C')
+        self.cell(0, 10, f'Relatório Anual (Sem RJ) - {self.ano_relatorio}', 0, 1, 'C')
         
         self.set_font('Arial', 'I', 9)
         self.set_text_color(100)
-        self.cell(0, 6, f"Consolidado de Performance de Vendas | Gerado em: {datetime.now().strftime('%d/%m/%Y')}", 0, 1, 'C')
+        self.cell(0, 6, f"Consolidado JF e Vale Aço | Gerado em: {datetime.now().strftime('%d/%m/%Y')}", 0, 1, 'C')
         
         self.set_draw_color(*hex_to_rgb(COR_PRINCIPAL))
         self.set_line_width(0.5)
@@ -65,12 +71,6 @@ class PDF(FPDF):
         self.cell(0, 10, f"  {texto}", 0, 1, 'L', fill=True)
         self.ln(3)
 
-    def subtitulo_secao(self, texto):
-        self.ln(1)
-        self.set_font('Arial', 'B', 11)
-        self.set_text_color(80, 80, 80)
-        self.cell(0, 8, texto, 0, 1, 'L')
-
     def criar_kpi_card(self, x, y, w, titulo, valor, cor_texto=COR_PRINCIPAL):
         self.set_xy(x, y)
         self.set_fill_color(252, 252, 252)
@@ -88,7 +88,7 @@ class PDF(FPDF):
         self.cell(w, 8, valor, 0, 1, 'C')
 
 def buscar_dados(ano):
-    print(f"--- Buscando dados consolidados de {ano} ---")
+    print(f"--- Buscando dados de {ano} (Filtrando RJ)... ---")
     client = MongoClient(MONGO_CONNECTION_STRING)
     db = client[MONGO_DATABASE]
     collection = db[MONGO_COLLECTION]
@@ -96,13 +96,22 @@ def buscar_dados(ano):
     inicio = datetime(ano, 1, 1)
     fim = datetime(ano, 12, 31, 23, 59, 59)
     
+    # Busca tudo do ano
     dados = list(collection.find({"emissao": {"$gte": inicio, "$lte": fim}}))
     if not dados: return pd.DataFrame()
     
     df = pd.DataFrame(dados)
     df['emissao'] = pd.to_datetime(df['emissao'])
-    df['mes_ano'] = df['emissao'].dt.strftime('%m') 
-    return df
+    
+    # --- FILTRO DE EXCLUSÃO DO RIO DE JANEIRO ---
+    # Mantém apenas as filiais listadas em FILIAIS_ATIVAS
+    df_filtrado = df[df['filial_nome'].isin(FILIAIS_ATIVAS)].copy()
+    
+    registros_removidos = len(df) - len(df_filtrado)
+    print(f"Registros carregados: {len(df)}. Removidos (RJ/Outros): {registros_removidos}. Mantidos: {len(df_filtrado)}.")
+    
+    df_filtrado['mes_ano'] = df_filtrado['emissao'].dt.strftime('%m') 
+    return df_filtrado
 
 def formatar_moeda(valor):
     if valor >= 1_000_000:
@@ -112,6 +121,7 @@ def formatar_moeda(valor):
     return f'R${valor:.0f}'
 
 def plotar_evolucao_detalhada(df, nome_arquivo):
+    if df.empty: return
     plt.figure(figsize=(12, 6))
     sns.set_style("whitegrid")
     
@@ -126,17 +136,21 @@ def plotar_evolucao_detalhada(df, nome_arquivo):
         ax.annotate(formatar_moeda(y), (x, y), textcoords="offset points", xytext=(0, 12), 
                     ha='center', fontsize=10, fontweight='bold', color=COR_PRINCIPAL)
 
-    ax.set_title(f'Evolução de Vendas Global ({df["emissao"].dt.year.iloc[0]})', fontsize=14, weight='bold', pad=20)
+    ax.set_title(f'Evolução de Vendas Global (JF + VA) - {df["emissao"].dt.year.iloc[0]}', fontsize=14, weight='bold', pad=20)
     ax.set_ylim(0, max_y * 1.15)
     ax.set_ylabel("Vendas", fontsize=10)
     ax.set_xlabel("Mês", fontsize=10)
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, p: formatar_moeda(x)))
-    plt.xticks(vendas_mes.index, [d.strftime('%b') for d in vendas_mes.index], rotation=0)
+    
+    if len(vendas_mes) > 0:
+        plt.xticks(vendas_mes.index, [d.strftime('%b') for d in vendas_mes.index], rotation=0)
+    
     plt.tight_layout()
     plt.savefig(nome_arquivo, dpi=300)
     plt.close()
 
 def plotar_evolucao_filiais_comparativa(df, nome_arquivo):
+    if df.empty: return
     plt.figure(figsize=(12, 7))
     sns.set_style("whitegrid")
     
@@ -144,6 +158,7 @@ def plotar_evolucao_filiais_comparativa(df, nome_arquivo):
     vendas_pivot = df.groupby(['mes', 'filial_nome'])['valor_total_pedido'].sum().reset_index()
     
     filiais_unicas = sorted(vendas_pivot['filial_nome'].unique())
+    # Mapeia cores apenas para as filiais ativas
     cores_map = {filial: PALETA_FILIAIS[i % len(PALETA_FILIAIS)] for i, filial in enumerate(filiais_unicas)}
     
     ax = sns.lineplot(data=vendas_pivot, x='mes', y='valor_total_pedido', hue='filial_nome', 
@@ -157,54 +172,41 @@ def plotar_evolucao_filiais_comparativa(df, nome_arquivo):
                         textcoords="offset points", xytext=(0, 8), ha='center', fontsize=8, 
                         fontweight='bold', color=cor_filial, alpha=1.0)
 
-    ax.set_title('Comparativo de Evolução: Filial vs Filial', fontsize=14, weight='bold', pad=20)
+    ax.set_title('Comparativo: Juiz de Fora vs Vale Aço', fontsize=14, weight='bold', pad=20)
     ax.set_ylabel("Vendas")
     ax.set_xlabel("")
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, p: formatar_moeda(x)))
-    plt.xticks(vendas_pivot['mes'].unique(), [pd.to_datetime(d).strftime('%b') for d in vendas_pivot['mes'].unique()])
+    
+    if not vendas_pivot.empty:
+        plt.xticks(vendas_pivot['mes'].unique(), [pd.to_datetime(d).strftime('%b') for d in vendas_pivot['mes'].unique()])
+        
     plt.legend(title='Filial', loc='upper left', bbox_to_anchor=(1, 1))
     plt.tight_layout()
     plt.savefig(nome_arquivo, dpi=300)
     plt.close()
 
 def plotar_evolucao_vendedores_fatiado(df, nome_arquivo, rank_inicio, rank_fim, titulo_custom=None):
-    """
-    Plota evolução de um slice específico de vendedores (ex: 1º ao 3º).
-    rank_inicio e rank_fim são índices base 0 (0 = 1º lugar).
-    """
-    plt.figure(figsize=(12, 6)) # Altura reduzida para caber 2 na página
+    if df.empty: return False
+    plt.figure(figsize=(12, 6))
     sns.set_style("whitegrid")
 
-    # 1. Identificar TODOS os Top Vendedores para manter consistência de cores se necessário
-    # ou apenas pega o ranking geral
     ranking_geral = df.groupby('vendedor')['valor_total_pedido'].sum().sort_values(ascending=False).index.tolist()
     
-    # 2. Selecionar apenas o intervalo desejado
-    # Proteção para não estourar lista
-    if rank_inicio >= len(ranking_geral):
-        return False # Nada a plotar
+    if rank_inicio >= len(ranking_geral): return False 
         
     vendedores_selecionados = ranking_geral[rank_inicio : min(rank_fim, len(ranking_geral))]
-    
-    if not vendedores_selecionados:
-        return False
+    if not vendedores_selecionados: return False
 
-    # 3. Filtrar Dados
     df_slice = df[df['vendedor'].isin(vendedores_selecionados)].copy()
     df_slice['mes'] = df_slice['emissao'].dt.to_period('M').dt.to_timestamp()
     
-    # 4. Agrupar
     vendas_pivot = df_slice.groupby(['mes', 'vendedor'])['valor_total_pedido'].sum().reset_index()
     
-    # Mapeamento de Cores: Usar índice do ranking geral para garantir cores consistentes ou fixas
-    # Mas aqui vamos usar uma paleta local para garantir contraste neste gráfico específico
     cores_map = {vend: PALETA_VENDEDORES[i % len(PALETA_VENDEDORES)] for i, vend in enumerate(vendedores_selecionados)}
 
-    # 5. Plotar
     ax = sns.lineplot(data=vendas_pivot, x='mes', y='valor_total_pedido', hue='vendedor', 
                       marker='o', palette=cores_map, linewidth=2.5)
 
-    # 6. Anotações
     for vendedor in vendedores_selecionados:
         dados_vend = vendas_pivot[vendas_pivot['vendedor'] == vendedor]
         cor_vend = cores_map[vendedor]
@@ -223,22 +225,20 @@ def plotar_evolucao_vendedores_fatiado(df, nome_arquivo, rank_inicio, rank_fim, 
     
     unique_meses = sorted(vendas_pivot['mes'].unique())
     plt.xticks(unique_meses, [pd.to_datetime(d).strftime('%b') for d in unique_meses])
-    
-    # Legenda compacta
     plt.legend(title='', loc='upper left', bbox_to_anchor=(1, 1), fontsize='small')
-    
     plt.tight_layout()
     plt.savefig(nome_arquivo, dpi=300)
     plt.close()
     return True
 
 def plotar_vendedores_ranking(df, nome_arquivo):
+    if df.empty: return
     plt.figure(figsize=(10, 8))
     vendas_vendedor = df.groupby('vendedor')['valor_total_pedido'].sum().sort_values(ascending=False)
     top_vendas = vendas_vendedor.head(15)
     
     ax = sns.barplot(x=top_vendas.values, y=top_vendas.index, palette="Blues_r")
-    ax.set_title('Ranking Geral - Top 15 Vendedores (Acumulado)', fontsize=14, weight='bold')
+    ax.set_title('Ranking Geral - Top 15 Vendedores (Sem RJ)', fontsize=14, weight='bold')
     ax.set_xlabel("Volume de Vendas (R$)", fontsize=10)
     ax.set_ylabel("")
     
@@ -252,14 +252,19 @@ def plotar_vendedores_ranking(df, nome_arquivo):
     plt.close()
 
 def plotar_distribuicao_filiais(df, nome_arquivo):
+    if df.empty: return
     plt.figure(figsize=(7, 7))
     total_por_filial = df.groupby('filial_nome')['valor_total_pedido'].sum()
-    plt.pie(total_por_filial, labels=None, autopct='%1.1f%%', startangle=90, pctdistance=0.85, colors=PALETA_FILIAIS)
+    
+    # Usa cores mapeadas corretamente
+    cores = [PALETA_FILIAIS[FILIAIS_ATIVAS.index(f)] if f in FILIAIS_ATIVAS else '#999999' for f in total_por_filial.index]
+
+    plt.pie(total_por_filial, labels=None, autopct='%1.1f%%', startangle=90, pctdistance=0.85, colors=cores)
     centre_circle = plt.Circle((0,0),0.70,fc='white')
     fig = plt.gcf()
     fig.gca().add_artist(centre_circle)
     plt.legend(total_por_filial.index, loc="center", bbox_to_anchor=(0.5, 0.5), frameon=False)
-    plt.title('Share de Vendas por Filial', weight='bold')
+    plt.title('Share de Vendas (JF vs VA)', weight='bold')
     plt.tight_layout()
     plt.savefig(nome_arquivo, dpi=300)
     plt.close()
@@ -269,6 +274,10 @@ def gerar_tabela_resumo_mensal(pdf, df):
     df['mes_num'] = df['emissao'].dt.month
     matriz_simples = df.groupby(['mes_num', 'filial_nome'])['valor_total_pedido'].sum().unstack(fill_value=0)
     
+    # Reordenar colunas se necessário para ficar JF primeiro, VA depois
+    cols_existentes = [c for c in FILIAIS_ATIVAS if c in matriz_simples.columns]
+    matriz_simples = matriz_simples[cols_existentes]
+
     header = ['Mês'] + list(matriz_simples.columns) + ['TOTAL MÊS']
     col_w_base = LARGURA_UTIL / len(header)
     col_widths = [col_w_base] * len(header)
@@ -310,34 +319,35 @@ def gerar_tabela_resumo_mensal(pdf, df):
     pdf.ln()
 
 def gerar_relatorio_final(ano_alvo):
-    # 1. Obter Dados
     df = buscar_dados(ano_alvo)
     if df.empty:
-        print(f"ERRO: Nenhum dado encontrado para o ano {ano_alvo}.")
+        print(f"ERRO: Nenhum dado encontrado para o ano {ano_alvo} nas filiais ativas.")
         return
 
     print("Gerando gráficos...")
     plotar_evolucao_detalhada(df, 'chart_evolucao_geral.png')
     plotar_evolucao_filiais_comparativa(df, 'chart_evolucao_comp.png')
     
-    # SPLIT DOS VENDEDORES
-    # Gráfico 1: Top 1 ao 3
+    # Split Vendedores
     plotar_evolucao_vendedores_fatiado(df, 'chart_vend_1_3.png', 0, 3, "Evolução Mensal - Top 3 Vendedores")
-    # Gráfico 2: Top 4 ao 5
     plotar_evolucao_vendedores_fatiado(df, 'chart_vend_4_5.png', 3, 5, "Evolução Mensal - Vendedores 4º e 5º")
     
     plotar_vendedores_ranking(df, 'chart_vendedores.png')
     plotar_distribuicao_filiais(df, 'chart_pizza.png')
 
-    # 2. Construir PDF
     print("Montando o PDF...")
     pdf = PDF(ano_alvo)
     
-    # --- PÁGINA 1: VISÃO GERAL ---
+    # PÁGINA 1
     pdf.add_page()
     total_vendas = df['valor_total_pedido'].sum()
     total_pedidos = len(df)
-    melhor_mes = df.groupby(df['emissao'].dt.strftime('%m/%Y'))['valor_total_pedido'].sum().idxmax()
+    
+    # Melhor mês considerando apenas dados filtrados
+    if not df.empty:
+        melhor_mes = df.groupby(df['emissao'].dt.strftime('%m/%Y'))['valor_total_pedido'].sum().idxmax()
+    else:
+        melhor_mes = "N/A"
     
     y_kpi = pdf.get_y()
     espaco = 2
@@ -347,41 +357,37 @@ def gerar_relatorio_final(ano_alvo):
     pdf.criar_kpi_card(MARGEM + (w_kpi + espaco)*2, y_kpi, w_kpi, "Melhor Mês", f"{melhor_mes}")
     pdf.ln(30)
     
-    pdf.titulo_secao("Evolução Mensal de Vendas (Geral)")
+    pdf.titulo_secao("Evolução Mensal (Sem RJ)")
     pdf.image('chart_evolucao_geral.png', x=MARGEM, w=LARGURA_UTIL, h=90)
     pdf.ln(5)
     
-    pdf.titulo_secao("Performance Mensal por Filial")
+    pdf.titulo_secao("Comparativo: Juiz de Fora x Vale Aço")
     pdf.image('chart_evolucao_comp.png', x=MARGEM, w=LARGURA_UTIL, h=95)
 
-    # --- PÁGINA 2: VENDEDORES (Foco total na equipe) ---
+    # PÁGINA 2
     pdf.add_page()
     pdf.titulo_secao("Análise de Performance: Vendedores")
     
-    # Subtítulo e Gráfico Top 3
-    # pdf.subtitulo_secao("Destaques Principais (Top 3)")
     y_cursor = pdf.get_y()
-    pdf.image('chart_vend_1_3.png', x=MARGEM, y=y_cursor, w=LARGURA_UTIL, h=80)
+    if os.path.exists('chart_vend_1_3.png'):
+        pdf.image('chart_vend_1_3.png', x=MARGEM, y=y_cursor, w=LARGURA_UTIL, h=80)
     pdf.set_y(y_cursor + 82)
     
-    # Subtítulo e Gráfico Top 4-5
-    # pdf.subtitulo_secao("Seguidores (4º e 5º Colocados)")
     y_cursor = pdf.get_y()
-    pdf.image('chart_vend_4_5.png', x=MARGEM, y=y_cursor, w=LARGURA_UTIL, h=80)
+    if os.path.exists('chart_vend_4_5.png'):
+        pdf.image('chart_vend_4_5.png', x=MARGEM, y=y_cursor, w=LARGURA_UTIL, h=80)
     pdf.set_y(y_cursor + 85)
     
-    # Ranking Geral
-    # pdf.subtitulo_secao("Ranking Acumulado")
     pdf.image('chart_vendedores.png', x=MARGEM, y=pdf.get_y(), w=LARGURA_UTIL, h=95)
 
-    # --- PÁGINA 3: FILIAIS & CLIENTES ---
+    # PÁGINA 3
     pdf.add_page()
     pdf.titulo_secao("Detalhamento por Unidade e Clientes")
     
     y_charts = pdf.get_y()
     pdf.image('chart_pizza.png', x=MARGEM, y=y_charts, w=80)
-    
     pdf.set_y(y_charts + 85)
+    
     gerar_tabela_resumo_mensal(pdf, df)
     
     pdf.ln(10)
@@ -403,11 +409,9 @@ def gerar_relatorio_final(ano_alvo):
         pdf.cell(120, 7, row['parceiro'][:50], 1, 0, 'L', fill=True)
         pdf.cell(55, 7, f"R$ {row['valor_total_pedido']:,.2f}", 1, 1, 'R', fill=True)
 
-    # 3. Finalizar
-    nome_arquivo_pdf = f"Fechamento_Anual_{ano_alvo}.pdf"
+    nome_arquivo_pdf = f"Fechamento_Anual_{ano_alvo}_SEM_RJ.pdf"
     pdf.output(nome_arquivo_pdf)
     
-    # Limpeza
     for f in ['chart_evolucao_geral.png', 'chart_evolucao_comp.png', 'chart_vend_1_3.png', 
               'chart_vend_4_5.png', 'chart_vendedores.png', 'chart_pizza.png']:
         if os.path.exists(f): os.remove(f)
@@ -419,5 +423,9 @@ if __name__ == '__main__':
         locale.setlocale(locale.LC_TIME, 'pt_BR.UTF-8')
     except:
         print("Aviso: Locale PT-BR não configurado.")
-    ano = int(input("Digite o ano para o fechamento (ex: 2024): "))
-    gerar_relatorio_final(ano)
+    
+    try:
+        ano = int(input("Digite o ano para o fechamento (ex: 2024): "))
+        gerar_relatorio_final(ano)
+    except ValueError:
+        print("Ano inválido.")
